@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cappy Catch!</title>
+
+  <style>
+    :root{
+      --page-bg: #f0f0f0;
+      --panel-bg: #ffffff;
+      --text: #222;
+      --muted: #666;
+      --start: #00a99d;    /* teal */
+      --pause: #ed1e79;    /* pink */
+      --restart: #76538f;  /* purple */
+      --border: #f0f0f0;
+      --radius: 12px;
+      --board-w: 960px;    /* medidas fijas */
+      --board-h: 560px;
+
+      /* Items más grandes y sin círculo */
+      --item-size: 36px;
+    }
+
+    *{ box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden; /* sin scroll */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: var(--page-bg);
+      color: var(--text);
+      font-family: "Bosch Office Sans","Bosch Sans","Bosch Office",
+                   ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    .wrap {
+      width: 980px;
+      transform: scale(1);
+      transform-origin: top center;
+    }
+    /* Escala para que siempre quepa en pantalla */
+    @media (max-width: 980px), (max-height: 650px) {
+      .wrap { transform: scale(calc(min(100vw / 980, 100vh / 650))); }
+    }
+
+    /* Score bar */
+    .panel{
+      background: var(--panel-bg);
+      width: var(--board-w);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+    }
+    .stats{ display:flex; gap:12px; }
+    .stat{
+      background:#fff; border-radius:10px;
+      border:2px solid var(--border);
+      padding:10px 12px; min-width:110px; text-align:center;
+    }
+    .stat b{ display:block; font-size:22px; }
+    .stat span{ display:block; font-size:12px; color:var(--muted) }
+
+    .controls{ display:flex; gap:10px; }
+    button{
+      appearance:none; border:none; cursor:pointer;
+      padding:10px 16px; border-radius:999px; font-weight:700; color:#fff;
+      text-transform:uppercase; letter-spacing:.5px;
+    }
+    #startBtn{ background: var(--start); }
+    #pauseBtn{ background: var(--pause); }
+    #resetBtn{ background: var(--restart); }
+    button:active{ transform: translateY(1px); }
+
+    /* Board */
+    .board{
+      position:relative;
+      width: var(--board-w);
+      height: var(--board-h);
+      background:#fff;
+      border-radius: var(--radius);
+      overflow:hidden;      /* nada puede salirse visualmente */
+      margin-top:12px;
+    }
+
+    /* Player (SVG personaje) */
+    #player{
+      position:absolute;
+      bottom:0;
+      left:0;               /* ← NO porcentaje, NO translateX */
+      width:95px;
+      height:126px;
+      pointer-events:none;
+    }
+    /* Pequeño “bleed” solo hacia la derecha para tapar cualquier gap visual */
+    #player svg,
+    #player img{
+      position:absolute;
+      bottom:0;
+      left:-5px;           /* ajusta entre -6 y -12 si deseas */
+      width:calc(100% + 5px);
+      height:100%;
+      display:block;
+      object-fit:contain;
+    }
+
+    /* Falling items — SIN CÍRCULO */
+    .item{
+      position:absolute; top: calc(-1 * var(--item-size));
+      width: var(--item-size); height: var(--item-size);
+      display:flex; align-items:center; justify-content:center;
+      font-weight:800;
+      font-size: calc(var(--item-size) * 0.9);  /* tamaño del emoji */
+      line-height:1;
+      background: transparent;  /* sin fondo */
+      border: none;              /* sin borde */
+      border-radius: 0;          /* sin círculo */
+      user-select:none;
+    }
+    .item img, .item svg{ width:100%; height:100%; display:block; }
+
+    .toast{
+      position:absolute; left:50%; top:18%;
+      transform: translate(-50%, -50%);
+      font-size:22px; font-weight:800; opacity:0; pointer-events:none;
+      transition: opacity .35s ease, transform .35s ease;
+    }
+    .toast.show{ opacity:1; transform: translate(-50%, -50%) scale(1.06); }
+
+    /* Intro modal */
+    .modal-backdrop{
+      position:fixed; inset:0; background:rgba(0,0,0,.28); display:none;
+      align-items:center; justify-content:center; z-index:10;
+    }
+    .modal{
+      width:560px; background:#fff; border:1px solid var(--border); border-radius: 12px;
+      padding:20px;
+    }
+    .modal h2{ margin:0 0 10px; }
+    .modal ul{ margin:10px 0 16px 20px; }
+    .modal .close-row{ display:flex; justify-content:flex-end; }
+    .modal button{ background:#111; color:#fff; text-transform:none; border-radius:8px; }
+    .modal-backdrop.show{ display:flex; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel" aria-live="polite">
+      <div class="stats">
+        <div class="stat"><b id="score">0</b><span>points</span></div>
+        <div class="stat"><b id="lives">3</b><span>lives</span></div>
+        <div class="stat"><b id="time">60</b><span>seconds</span></div>
+        <div class="stat"><b id="best">0</b><span>best</span></div>
+      </div>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="resetBtn">Restart</button>
+      </div>
+    </div>
+
+    <div id="board" class="board" role="application" aria-label="Game area">
+      <div id="player" aria-label="Player">
+        <!-- aquí va tu personaje -->
+        <img src="assets/cappy.svg" alt="Cappy">
+      </div>
+      <div id="toast" class="toast"></div>
+    </div>
+  </div>
+
+  <!-- Intro modal -->
+  <div id="intro" class="modal-backdrop show">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+      <h2 id="introTitle">How to play</h2>
+      <p>Catch the good items and avoid the bad ones:</p>
+      <ul>
+        <li><strong>Carrot</strong> = <b>+1 point</b></li>
+        <li><strong>Star</strong> = <b>+2 points</b></li>
+        <li><strong>Bomb</strong> = <b>-1 life</b> and <b>-1 point</b></li>
+      </ul>
+      <p>You have <b>60 seconds</b> and <b>3 lives</b>. Close this window and press <b>START</b> when you’re ready.</p>
+      <p>Use <strong>←</strong> <strong>→</strong> or drag / tap to move</p>
+      <div class="close-row">
+        <button id="closeIntro">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (()=>{
+      const board   = document.getElementById('board');
+      const player  = document.getElementById('player');
+      const scoreEl = document.getElementById('score');
+      const livesEl = document.getElementById('lives');
+      const timeEl  = document.getElementById('time');
+      const bestEl  = document.getElementById('best');
+      const startBtn= document.getElementById('startBtn');
+      const pauseBtn= document.getElementById('pauseBtn');
+      const resetBtn= document.getElementById('resetBtn');
+      const toast   = document.getElementById('toast');
+      const intro   = document.getElementById('intro');
+      const closeIntro = document.getElementById('closeIntro');
+
+      const ITEM_SIZE = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--item-size')) || 36;
+
+      /* márgenes de seguridad y bleed */
+      const EDGE_PAD = 6;     // no spawnear pegado a las paredes
+      const HIT_PAD  = 8;     // amplía hitbox del capy
+      const RIGHT_BLEED = 12; // permite meterse un poco a la derecha (tapa el gap)
+
+      const state = {
+        running:false, paused:false, over:false,
+        score:0, lives:3, time:60,
+        speed: 140,            // px/s base caida
+        spawnEvery: 700,       // ms
+        lastSpawn: 0,
+        items: new Set(),
+        lastTs: 0,
+      };
+
+      const clamp = (n, min, max)=> Math.max(min, Math.min(max, n));
+
+      function setBest(n){
+        try{
+          const prev = +localStorage.getItem('cappy_best') || 0;
+          if(n>prev) localStorage.setItem('cappy_best', n);
+          bestEl.textContent = Math.max(n, prev);
+        }catch{ bestEl.textContent = n; }
+      }
+      setBest(0);
+
+      function showToast(text, good=true){
+        toast.textContent = text;
+        toast.style.color = good ? '#0a7d48' : '#b00020';
+        toast.classList.remove('show'); void toast.offsetWidth; toast.classList.add('show');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(()=>toast.classList.remove('show'), 600);
+      }
+
+      function centerPlayer(){
+        // centrado seguro en píxeles (sin translateX en CSS)
+        const x = (board.clientWidth - player.offsetWidth) / 2;
+        player.style.left = x + 'px';
+      }
+
+      function reset(){
+        for(const el of state.items){ el.remove(); }
+        state.items.clear();
+
+        state.running=false; state.paused=false; state.over=false;
+        state.score=0; state.lives=3; state.time=60;
+        state.speed=140; state.spawnEvery=700; state.lastSpawn=0; state.lastTs=0;
+
+        scoreEl.textContent='0'; livesEl.textContent='3'; timeEl.textContent='60';
+        pauseBtn.textContent='Pause';
+
+        centerPlayer();
+      }
+
+      function start(){ if(state.over) reset(); state.running=true; state.paused=false; }
+      function pause(){ state.paused=!state.paused; pauseBtn.textContent = state.paused? 'Resume' : 'Pause'; }
+
+      // Crear item
+      function spawn(ts){
+        if(ts - state.lastSpawn < state.spawnEvery) return;
+        state.lastSpawn = ts;
+
+        const el = document.createElement('div');
+        el.className = 'item';
+
+        // 50% carrot, 30% star, 20% bomb
+        const r = Math.random();
+        let type = 'carrot';
+        if(r > 0.8) type = 'bomb';
+        else if(r > 0.5) type = 'star';
+        el.dataset.type = type;
+
+        // Emojis (o cambia por <img src="assets/*.svg">)
+        if(type==='carrot'){ el.textContent = '🥕'; }
+        else if(type==='star'){ el.textContent = '⭐'; }
+        else{ el.textContent = '💣'; }
+
+        // nunca nacer pegados al borde
+        const maxX = board.clientWidth - ITEM_SIZE - EDGE_PAD*2;
+        const x = EDGE_PAD + Math.random() * maxX;
+        el.style.left = x + 'px';
+        el.style.top  = -ITEM_SIZE + 'px';
+
+        el.dataset.vy = (state.speed + Math.random()*80).toString();
+        board.appendChild(el);
+        state.items.add(el);
+
+        // progresión
+        state.speed = Math.min(380, state.speed + 1.2);
+        state.spawnEvery = Math.max(260, state.spawnEvery - 4);
+      }
+
+      function rect(el){ return el.getBoundingClientRect(); }
+      function intersects(a,b){ return !(a.right<b.left || a.left>b.right || a.bottom<b.top || a.top>b.bottom); }
+      function expand(r, pad){ return { left:r.left-pad, right:r.right+pad, top:r.top, bottom:r.bottom }; }
+
+      function update(dt, ts){
+        if(!state.running || state.paused) return;
+
+        // Tiempo
+        state.time -= dt/1000; if(state.time<0) state.time=0;
+        timeEl.textContent = Math.ceil(state.time);
+        if(state.time === 0){ return gameOver(); }
+
+        spawn(ts);
+
+        // Hitbox del jugador ligeramente más ancho
+        const pb = expand(rect(player), HIT_PAD);
+
+        for(const el of [...state.items]){
+          const vy = +el.dataset.vy;
+          const y = (parseFloat(el.style.top) || -ITEM_SIZE) + vy * (dt/1000);
+          el.style.top = y + 'px';
+
+          if(y > board.clientHeight){
+            el.remove(); state.items.delete(el); continue;
+          }
+
+          const rb = rect(el);
+          if(intersects(pb, rb)){
+            const type = el.dataset.type;
+            if(type==='bomb'){
+              state.lives--; state.score--;
+              livesEl.textContent = state.lives;
+              scoreEl.textContent = state.score;
+              showToast('−1 life & −1', false);
+              if(state.lives<=0) return gameOver();
+            }else if(type==='carrot'){
+              state.score += 1; scoreEl.textContent = state.score; showToast('+1', true);
+            }else{ // star
+              state.score += 2; scoreEl.textContent = state.score; showToast('+2', true);
+            }
+            el.remove(); state.items.delete(el);
+          }
+        }
+      }
+
+      function gameOver(){
+        state.running=false; state.over=true; setBest(state.score);
+        showToast('Game over', false);
+      }
+
+      function loop(ts){
+        if(!state.lastTs) state.lastTs = ts;
+        const dt = ts - state.lastTs; state.lastTs = ts;
+        if(state.running && !state.paused) update(dt, ts);
+        requestAnimationFrame(loop);
+      }
+
+      // Teclado
+      const keys = { left:false, right:false };
+      window.addEventListener('keydown', (e)=>{
+        if(e.key==='ArrowLeft' || e.key==='a') keys.left=true;
+        if(e.key==='ArrowRight' || e.key==='d') keys.right=true;
+        if(e.key.toLowerCase()==='p') pause();
+      });
+      window.addEventListener('keyup', (e)=>{
+        if(e.key==='ArrowLeft' || e.key==='a') keys.left=false;
+        if(e.key==='ArrowRight' || e.key==='d') keys.right=false;
+      });
+
+      function movePlayer(dt){
+        const speed = 420; // px/s
+        const dx = (keys.right - keys.left) * speed * (dt/1000);
+        if(dx){
+          const cur = player.offsetLeft; // relativo al board
+          // 👉 NO permitimos negativo (nada de overflow a la izquierda)
+          const next = clamp(cur + dx, 0, board.clientWidth - player.clientWidth + RIGHT_BLEED);
+          player.style.left = next + 'px';
+        }
+        requestAnimationFrame((ts)=>{
+          if(!movePlayer._last) movePlayer._last = ts;
+          const delta = ts - movePlayer._last; movePlayer._last = ts;
+          movePlayer(delta);
+        });
+      }
+      movePlayer(16);
+
+      // Drag
+      let dragging = false, offsetX = 0;
+      function pointerX(evt){ return (evt.touches? evt.touches[0].clientX : evt.clientX) - board.getBoundingClientRect().left; }
+      board.addEventListener('pointerdown', (e)=>{ dragging=true; offsetX = pointerX(e) - player.offsetLeft; });
+      window.addEventListener('pointerup', ()=> dragging=false);
+      window.addEventListener('pointermove', (e)=>{
+        if(!dragging) return;
+        const x = pointerX(e) - offsetX;
+        // 👉 min 0 (cero overflow a la izquierda), bleed a la derecha
+        const next = clamp(x, 0, board.clientWidth - player.clientWidth + RIGHT_BLEED);
+        player.style.left = next + 'px';
+      }, {passive:true});
+
+      // Botones
+      startBtn.addEventListener('click', ()=> start());
+      pauseBtn.addEventListener('click', ()=> pause());
+      resetBtn.addEventListener('click', ()=> reset());
+
+      // Resize (mantener dentro)
+      new ResizeObserver(()=>{
+        const next = clamp(player.offsetLeft, 0, board.clientWidth - player.clientWidth + RIGHT_BLEED);
+        player.style.left = next + 'px';
+      }).observe(board);
+
+      // Intro
+      closeIntro.addEventListener('click', ()=> intro.classList.remove('show'));
+
+      // Kickoff
+      reset();
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>
